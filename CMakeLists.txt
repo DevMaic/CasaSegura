@@ -35,7 +35,7 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(CasaSegura CasaSegura.c )
+add_executable(CasaSegura CasaSegura.c inc/ssd1306.c)
 
 pico_set_program_name(CasaSegura "CasaSegura")
 pico_set_program_version(CasaSegura "0.1")
@@ -48,6 +48,7 @@ pico_enable_stdio_usb(CasaSegura 1)
 target_link_libraries(CasaSegura
         pico_stdlib    
         hardware_pwm
+        hardware_i2c
         pico_cyw43_arch_lwip_threadsafe_background
         )
         

@@ -10,8 +10,17 @@
 #define LED_PIN 12 // Define o pino do LED
 #define WIFI_SSID "FIBRANET.COM - 87981616006"  // Substitua pelo nome da sua rede Wi-Fi
 #define WIFI_PASS "Bira1210" // Substitua pela senha da sua rede Wi-Fi
+#include "hardware/i2c.h"
+#include "hardware/clocks.h"
+#include "inc/ssd1306.h"
+#include "inc/font.h"
+#define I2C_PORT i2c1
+#define I2C_SDA 14
+#define I2C_SCL 15
+#define endereco 0x3C
 
 bool alarmando = false;
+ssd1306_t ssd; // Inicializa a estrutura do display
 
 // Buffer para respostas HTTP
 #define HTTP_RESPONSE "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n" \
@@ -111,12 +120,14 @@ void gerenciarEstadoAlarme(uint gpio, uint32_t events) {
         gpio_set_function(BUZZER_PIN, GPIO_FUNC_PWM);
         pwm_set_enabled(pwm_gpio_to_slice_num(BUZZER_PIN), true);
         set_buzzer_frequency(BUZZER_PIN, BUZZER_FREQUENCY);
+        gpio_put(LED_PIN, 1);
     } else if(gpio == 6) {
         pwm_set_gpio_level(BUZZER_PIN, 0);
         pwm_set_enabled(pwm_gpio_to_slice_num(BUZZER_PIN), false);
         gpio_set_function(BUZZER_PIN, GPIO_FUNC_SIO);
         gpio_set_dir(BUZZER_PIN, GPIO_OUT);
         gpio_put(BUZZER_PIN, 0);
+        gpio_put(LED_PIN, 0);
 
         // Garante que o pino está em nível baixo
         alarmando = false;
@@ -124,32 +135,56 @@ void gerenciarEstadoAlarme(uint gpio, uint32_t events) {
     
 }
 
+void drawOnDisplay(char* text) {
+    ssd1306_fill(&ssd, false);
+    ssd1306_draw_string(&ssd, text, 0, 0);
+    ssd1306_send_data(&ssd);
+}
+
 int main() {
     stdio_init_all();  // Inicializa a saída padrão
     sleep_ms(10000);
+
+    i2c_init(I2C_PORT, 400 * 1000); // I2C Initialisation. Using it at 400Khz.
+    set_sys_clock_khz(128000, false); // Set the system clock to 128Mhz
+
+    gpio_set_function(I2C_SDA, GPIO_FUNC_I2C); // Set the GPIO pin function to I2C
+    gpio_set_function(I2C_SCL, GPIO_FUNC_I2C); // Set the GPIO pin function to I2C
+    gpio_pull_up(I2C_SDA); // Pull up the data line
+    gpio_pull_up(I2C_SCL); // Pull up the clock line
+    ssd1306_init(&ssd, WIDTH, HEIGHT, false, endereco, I2C_PORT); // Inicializa o display
+    ssd1306_config(&ssd); // Configura o display
+    ssd1306_send_data(&ssd); // Envia os dados para o display
+    
+    // Limpa o display. O display inicia com todos os pixels apagados.
+    ssd1306_fill(&ssd, false);
+    ssd1306_send_data(&ssd);
+
+    drawOnDisplay("Iniciando servidor HTTP");
     printf("Iniciando servidor HTTP\n");
 
     // Inicializa o Wi-Fi
     if (cyw43_arch_init()) {
+        drawOnDisplay("Erro ao inicializar o Wi-Fi");
         printf("Erro ao inicializar o Wi-Fi\n");
         return 1;
     }
 
     cyw43_arch_enable_sta_mode();
-    printf("Conectando ao Wi-Fi...\n");
+    drawOnDisplay("Conectando ao Wi-Fi");
+    printf("\n");
 
     if (cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASS, CYW43_AUTH_WPA2_AES_PSK, 10000)) {
+        drawOnDisplay("Falha ao conectar ao Wi-Fi");
         printf("Falha ao conectar ao Wi-Fi\n");
         return 1;
     }else {
+        drawOnDisplay("Wi-Fi conectado!");
         printf("Connected.\n");
         // Read the ip address in a human readable way
         uint8_t *ip_address = (uint8_t*)&(cyw43_state.netif[0].ip_addr.addr);
         printf("Endereço IP %d.%d.%d.%d\n", ip_address[0], ip_address[1], ip_address[2], ip_address[3]);
     }
-
-    printf("Wi-Fi conectado!\n");
-    printf("Para ligar ou desligar o LED acesse o Endereço IP seguido de /led/on ou /led/off\n");
 
     // Configura o LED como saída
     gpio_init(LED_PIN);
@@ -160,9 +195,6 @@ int main() {
 
     // Inicializa o PWM no pino do buzzer
     pwm_init_buzzer(BUZZER_PIN);
-
-    // Define a frequência do buzzer
-    // set_buzzer_frequency(BUZZER_PIN, BUZZER_FREQUENCY);
 
     gpio_init(5);
     gpio_set_dir(5, GPIO_IN);
@@ -177,8 +209,7 @@ int main() {
 
     // Loop principal
     while (true) {
-        // cyw43_arch_poll();  // Necessário para manter o Wi-Fi ativo
-        gpio_put(LED_PIN, 1);
+        // cyw43_arch_poll();  // Necessário para manter o Wi-Fi ativo;
         if(alarmando) {
               // Liga o LED
             for (int freq = 0; freq <= 2000; freq += 50) {  // Sobe de tom
