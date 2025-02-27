@@ -8,8 +8,8 @@
 #define BUZZER_PIN 21 // Defina o pino do buzzer
 #define BUZZER_FREQUENCY 2000 // Frequência desejada para o buzzer (em Hz)
 #define LED_PIN 12 // Define o pino do LED
-#define WIFI_SSID "FIBRANET.COM - 87981616006"  // Substitua pelo nome da sua rede Wi-Fi
-#define WIFI_PASS "Bira1210" // Substitua pela senha da sua rede Wi-Fi
+#define WIFI_SSID "SUBSTITUA POR O NOME DA SUA REDE WIFI"  // Substitua pelo nome da sua rede Wi-Fi ou o programa não funcionará
+#define WIFI_PASS "SUBSTITUA POR A SENHA DA SUA REDE WIFI" // Substitua pela senha da sua rede Wi-Fi ou o programa não funcionará
 #include "hardware/i2c.h"
 #include "hardware/clocks.h"
 #include "inc/ssd1306.h"
@@ -21,14 +21,29 @@
 
 bool alarmando = false;
 ssd1306_t ssd; // Inicializa a estrutura do display
+int pagina = 0;
 
-// Buffer para respostas HTTP
-#define HTTP_RESPONSE "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n" \
-                      "<!DOCTYPE html><html><body>" \
-                      "<h1>Controle do LED</h1>" \
-                      "<p><a href=\"/led/on\">Ligar LED</a></p>" \
-                      "<p><a href=\"/led/off\">Desligar LED</a></p>" \
-                      "</body></html>\r\n"
+// Página inicial
+#define HTTP_HOME "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n" \
+                  "<!DOCTYPE html><html><body>" \
+                  "<h1>Controle do LED</h1>" \
+                  "<p><a href=\"/led/on\">Ligar LED</a></p>" \
+                  "<p><a href=\"/led/off\">Desligar LED</a></p>" \
+                  "</body></html>\r\n"
+
+// Página LED ligado
+#define HTTP_LED_ON "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n" \
+                    "<!DOCTYPE html><html><body>" \
+                    "<h1>LED Ligado</h1>" \
+                    "<p><a href=\"/\">Voltar</a></p>" \
+                    "</body></html>\r\n"
+
+// Página LED desligado
+#define HTTP_LED_OFF "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n" \
+                     "<!DOCTYPE html><html><body>" \
+                     "<h1>LED Desligado</h1>" \
+                     "<p><a href=\"/\">Voltar</a></p>" \
+                     "</body></html>\r\n"
 
 void pwm_init_buzzer(uint pin) {
     // Configura o pino para a função PWM
@@ -63,24 +78,34 @@ void set_buzzer_frequency(uint pin, uint32_t freq) {
 // Função de callback para processar requisições HTTP
 static err_t http_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
     if (p == NULL) {
-        // Cliente fechou a conexão
         tcp_close(tpcb);
         return ERR_OK;
     }
 
     // Processa a requisição HTTP
     char *request = (char *)p->payload;
+    char *response;
 
     if (strstr(request, "GET /led/on")) {
-        gpio_put(LED_PIN, 0);  // Desliga o LED
-        alarmando = false;
-        set_buzzer_frequency(BUZZER_PIN, 0);
+        gpio_put(LED_PIN, 1);  // Liga o LED
+        response = HTTP_LED_ON;
     } else if (strstr(request, "GET /led/off")) {
+        alarmando = false;
+        pwm_set_gpio_level(BUZZER_PIN, 0);
+        pwm_set_enabled(pwm_gpio_to_slice_num(BUZZER_PIN), false);
+        gpio_set_function(BUZZER_PIN, GPIO_FUNC_SIO);
+        gpio_set_dir(BUZZER_PIN, GPIO_OUT);
+        gpio_put(BUZZER_PIN, 0);
+        gpio_put(LED_PIN, 0);
+
         gpio_put(LED_PIN, 0);  // Desliga o LED
+        response = HTTP_LED_OFF;
+    } else {
+        response = HTTP_HOME;
     }
 
-    // Envia a resposta HTTP
-    tcp_write(tpcb, HTTP_RESPONSE, strlen(HTTP_RESPONSE), TCP_WRITE_FLAG_COPY);
+    // Envia a resposta HTTP correspondente
+    tcp_write(tpcb, response, strlen(response), TCP_WRITE_FLAG_COPY);
 
     // Libera o buffer recebido
     pbuf_free(p);
@@ -95,7 +120,7 @@ static err_t connection_callback(void *arg, struct tcp_pcb *newpcb, err_t err) {
 }
 
 // Função de setup do servidor TCP
-static void start_http_server(void) {
+static void start_http_server() {
     struct tcp_pcb *pcb = tcp_new();
     if (!pcb) {
         printf("Erro ao criar PCB\n");
@@ -132,7 +157,6 @@ void gerenciarEstadoAlarme(uint gpio, uint32_t events) {
         // Garante que o pino está em nível baixo
         alarmando = false;
     }
-    
 }
 
 void drawOnDisplay(char* text) {
@@ -209,9 +233,8 @@ int main() {
 
     // Loop principal
     while (true) {
-        // cyw43_arch_poll();  // Necessário para manter o Wi-Fi ativo;
+        cyw43_arch_poll();  // Necessário para manter o Wi-Fi ativo;
         if(alarmando) {
-              // Liga o LED
             for (int freq = 0; freq <= 2000; freq += 50) {  // Sobe de tom
                 set_buzzer_frequency(BUZZER_PIN, BUZZER_FREQUENCY+freq);
                 sleep_ms(40);
